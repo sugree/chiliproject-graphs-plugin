@@ -7,23 +7,25 @@ class GraphsController < ApplicationController
     ############################################################################
     # Initialization
     ############################################################################
-    
+
     menu_item :issues, :only => [:issue_growth, :old_issues]
 
+    before_filter :authorize_global, :except => [:recent_status_changes_graph, :recent_assigned_to_changes_graph]
     before_filter :find_version, :only => [:target_version_graph]
     before_filter :confirm_issues_exist, :only => [:issue_growth]
     before_filter :find_optional_project, :only => [:issue_growth_graph]
     before_filter :find_open_issues, :only => [:old_issues, :issue_age_graph]
-    
+
     helper IssuesHelper
 
-    
+
     ############################################################################
     # My Page block graphs
     ############################################################################
-    
+
     # Displays a ring of issue assignement changes around the current user
     def recent_assigned_to_changes_graph
+      if User.current.allowed_to?(:view_graphs, nil, :global => true)
         # Get the top visible projects by issue count
         sql = " select u1.id as old_user, u2.id as new_user, count(*) as changes_count"
         sql << " from journals as j"
@@ -40,10 +42,14 @@ class GraphsController < ApplicationController
         @users = User.find(:all, :conditions => "id IN ("+user_ids.join(',')+")").index_by { |user| user.id } unless user_ids.empty?
         headers["Content-Type"] = "image/svg+xml"
         render :layout => false
+      else
+        render :text => t("warning_not_allowed_block")
+      end
     end
-    
+
     # Displays a ring of issue status changes
     def recent_status_changes_graph
+      if User.current.allowed_to?(:view_graphs, nil, :global => true)
         # Get the top visible projects by issue count
         sql = " select is1.id as old_status, is2.id as new_status, count(*) as changes_count"
         sql << " from journals as j"
@@ -57,31 +63,34 @@ class GraphsController < ApplicationController
         @issue_statuses = IssueStatus.find(:all).sort { |a,b| a.position<=>b.position }
         headers["Content-Type"] = "image/svg+xml"
         render :layout => false
+      else
+        render :text => t("warning_not_allowed_block")
+      end
     end
-    
-    
+
+
     ############################################################################
     # Graph pages
     ############################################################################
-    
+
     # Displays total number of issues over time
     def issue_growth
     end
-    
-    # Displays created vs update date on open issues over time    
+
+    # Displays created vs update date on open issues over time
     def old_issues
-        @issues_by_created_on = @issues.sort {|a,b| a.created_on<=>b.created_on} 
+        @issues_by_created_on = @issues.sort {|a,b| a.created_on<=>b.created_on}
         @issues_by_updated_on = @issues.sort {|a,b| a.updated_on<=>b.updated_on}
     end
-    
-        
+
+
     ############################################################################
     # Embedded graphs for graph pages
     ############################################################################
-    
+
     # Displays projects by total issues over time
     def issue_growth_graph
-    
+
         # Initialize the graph
         graph = SVG::Graph::TimeSeries.new({
             :area_fill => true,
@@ -98,7 +107,7 @@ class GraphsController < ApplicationController
             :width => 720,
             :x_label_format => "%Y-%m-%d"
         })
-        
+
         # Get the top visible projects by issue count
         sql = "SELECT project_id, COUNT(*) as issue_count"
         sql << " FROM issues"
@@ -108,12 +117,12 @@ class GraphsController < ApplicationController
             sql << " AND (project_id = #{@project.id}"
             sql << "    OR project_id IN (%s)" % @project.descendants.active.visible.collect { |p| p.id }.join(',') unless @project.descendants.active.visible.empty?
             sql << " )"
-        end 
+        end
         sql << " GROUP BY project_id"
         sql << " ORDER BY issue_count DESC"
         sql << " LIMIT 6"
         top_projects = ActiveRecord::Base.connection.select_all(sql).collect { |p| p["project_id"] }
-        
+
         # Get the issues created per project, per day
         sql = "SELECT project_id, date(#{Issue.table_name}.created_on) as date, COUNT(*) as issue_count"
         sql << " FROM #{Issue.table_name}"
@@ -123,18 +132,18 @@ class GraphsController < ApplicationController
 
         # Generate the created_on lines
         top_projects.each do |project_id, total_count|
-            counts = issue_counts[project_id].sort { |a,b| a["date"]<=>b["date"] }         
+            counts = issue_counts[project_id].sort { |a,b| a["date"]<=>b["date"] }
             created_count = 0
             created_on_line = Hash.new
-            created_on_line[(Date.parse(counts.first["date"])-1).to_s] = 0
-            counts.each { |count| created_count += count["issue_count"].to_i; created_on_line[count["date"]] = created_count }
+            created_on_line[(Date.parse(counts.first["date"].to_s)-1).to_s] = 0
+            counts.each { |count| created_count += count["issue_count"].to_i; created_on_line[count["date"].to_s] = created_count }
             created_on_line[Date.today.to_s] = created_count
             graph.add_data({
                 :data => created_on_line.sort.flatten,
                 :title => Project.find(project_id).to_s
             })
         end
-        
+
         # Compile the graph
         headers["Content-Type"] = "image/svg+xml"
         send_data(graph.burn, :type => "image/svg+xml", :disposition => "inline")
@@ -143,7 +152,7 @@ class GraphsController < ApplicationController
 
     # Displays issues by creation date, cumulatively
     def issue_age_graph
-    
+
         # Initialize the graph
         graph = SVG::Graph::TimeSeries.new({
             :area_fill => true,
@@ -164,7 +173,7 @@ class GraphsController < ApplicationController
         # Group issues
         issues_by_created_on = @issues.group_by {|issue| issue.created_on.to_date }.sort
         issues_by_updated_on = @issues.group_by {|issue| issue.updated_on.to_date }.sort
-        
+
         # Generate the created_on line
         created_count = 0
         created_on_line = Hash.new
@@ -174,7 +183,7 @@ class GraphsController < ApplicationController
             :data => created_on_line.sort.flatten,
             :title => l(:field_created_on)
         }) unless issues_by_created_on.empty?
-        
+
         # Generate the closed_on line
         updated_count = 0
         updated_on_line = Hash.new
@@ -184,12 +193,12 @@ class GraphsController < ApplicationController
             :data => updated_on_line.sort.flatten,
             :title => l(:field_updated_on)
         }) unless issues_by_updated_on.empty?
-        
+
         # Compile the graph
         headers["Content-Type"] = "image/svg+xml"
         send_data(graph.burn, :type => "image/svg+xml", :disposition => "inline")
     end
-    
+
     # Displays open and total issue counts over time
     def target_version_graph
 
@@ -214,14 +223,14 @@ class GraphsController < ApplicationController
         issues_by_created_on = @version.fixed_issues.group_by {|issue| issue.created_on.to_date }.sort
         issues_by_updated_on = @version.fixed_issues.group_by {|issue| issue.updated_on.to_date }.sort
         issues_by_closed_on = @version.fixed_issues.collect {|issue| issue if issue.closed? }.compact.group_by {|issue| issue.updated_on.to_date }.sort
-                    
+
         # Set the scope of the graph
         scope_end_date = issues_by_updated_on.last.first
         scope_end_date = @version.effective_date if !@version.effective_date.nil? && @version.effective_date > scope_end_date
         scope_end_date = Date.today if !@version.completed?
         line_end_date = Date.today
         line_end_date = scope_end_date if scope_end_date < line_end_date
-                    
+
         # Generate the created_on line
         created_count = 0
         created_on_line = Hash.new
@@ -231,7 +240,7 @@ class GraphsController < ApplicationController
             :data => created_on_line.sort.flatten,
             :title => l(:label_total).capitalize
         })
-        
+
         # Generate the closed_on line
         closed_count = 0
         closed_on_line = Hash.new
@@ -241,25 +250,25 @@ class GraphsController < ApplicationController
             :data => closed_on_line.sort.flatten,
             :title => l(:label_closed_issues).capitalize
         })
-        
+
         # Add the version due date marker
         graph.add_data({
             :data => [@version.effective_date.to_s, created_count],
             :title => l(:field_due_date).capitalize
         }) unless @version.effective_date.nil?
-        
-        
+
+
         # Compile the graph
         headers["Content-Type"] = "image/svg+xml"
         send_data(graph.burn, :type => "image/svg+xml", :disposition => "inline")
     end
-    
-    
+
+
     ############################################################################
     # Private methods
     ############################################################################
     private
-            
+
     def confirm_issues_exist
         find_optional_project
         if !@project.nil?
@@ -272,7 +281,7 @@ class GraphsController < ApplicationController
     rescue ActiveRecord::RecordNotFound
         render_404
     end
-    
+
     def find_open_issues
         find_optional_project
         if !@project.nil?
@@ -285,14 +294,14 @@ class GraphsController < ApplicationController
     rescue ActiveRecord::RecordNotFound
         render_404
     end
-        
+
     def find_optional_project
         @project = Project.find(params[:project_id]) unless params[:project_id].blank?
         deny_access unless User.current.allowed_to?(:view_issues, @project, :global => true)
     rescue ActiveRecord::RecordNotFound
         render_404
     end
-    
+
     def find_version
         @version = Version.find(params[:id])
         deny_access unless User.current.allowed_to?(:view_issues, @version.project)

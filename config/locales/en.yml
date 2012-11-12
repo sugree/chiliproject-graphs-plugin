@@ -6,4 +6,7 @@ en:
   label_graphs_issue_status_flow: Recent status changes (within 24 hours)
   label_graphs_assigned_to_status_flow: Recent assignment changes (within 24 hours)
   warning_no_issues: There are no issues to graph.
-  
+  warning_not_allowed_block: Sorry you can't use this block.
+  permission_view_graphs: View Graphs
+
+
