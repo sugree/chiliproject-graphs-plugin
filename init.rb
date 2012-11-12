@@ -8,4 +8,8 @@ Redmine::Plugin.register :redmine_graphs do
   author 'Brad Beattie'
   description 'This plugin provides instances of Redmine with additional graphs.'
   version '0.1.0'
+
+  project_module :graphs do
+    permission :view_graphs, :graphs => [:issue_growth, :old_issues]
+  end
 end
